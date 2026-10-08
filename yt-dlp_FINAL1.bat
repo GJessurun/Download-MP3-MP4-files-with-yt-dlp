@@ -24,48 +24,129 @@ try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 } catch {}
 
+function Get-YtDlpVersion {
+    try {
+        $versionOutput = & yt-dlp --version 2>$null
+        if ($versionOutput) {
+            return $versionOutput.Trim()
+        }
+    } catch {}
+    return $null
+}
+
+function Get-LatestYtDlpVersion {
+    try {
+        $response = Invoke-WebRequest -Uri "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest" -TimeoutSec 5 -ErrorAction SilentlyContinue
+        if ($response) {
+            $json = $response.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($json.tag_name) {
+                return $json.tag_name.TrimStart('v')
+            }
+        }
+    } catch {}
+    return $null
+}
+
+function Compare-Versions {
+    param([string]$Current, [string]$Latest)
+    
+    if (-not $Current -or -not $Latest) { return $false }
+    
+    $current_arr = $Current.Split('.') | ForEach-Object { [int]$_ }
+    $latest_arr = $Latest.Split('.') | ForEach-Object { [int]$_ }
+    
+    for ($i = 0; $i -lt [Math]::Max($current_arr.Count, $latest_arr.Count); $i++) {
+        $c = if ($i -lt $current_arr.Count) { $current_arr[$i] } else { 0 }
+        $l = if ($i -lt $latest_arr.Count) { $latest_arr[$i] } else { 0 }
+        
+        if ($c -lt $l) { return $true }  # Mise à jour nécessaire
+        if ($c -gt $l) { return $false }
+    }
+    return $false
+}
+
 function Test-AndInstallDependency {
-    Write-Host "Verification des dependances..." -ForegroundColor Cyan
+    Write-Host "╔════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║   Verification des dependances...      ║" -ForegroundColor Cyan
+    Write-Host "╚════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host ""
     
     # Verifier yt-dlp
     $ytDlp = Get-Command yt-dlp -ErrorAction SilentlyContinue
+    
     if (-not $ytDlp) {
-        Write-Host "`n[INFO] yt-dlp n'est pas installe. Installation en cours..." -ForegroundColor Yellow
+        Write-Host "⏳ yt-dlp n'est pas installe..." -ForegroundColor Yellow
+        Write-Host "   Installation en cours avec winget..." -ForegroundColor Gray
+        
         try {
-            & winget install yt-dlp -e -h 2>$null
+            & winget install yt-dlp -e -h 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "[OK] yt-dlp installe avec succes." -ForegroundColor Green
+                Write-Host "✓ yt-dlp installe avec succes !" -ForegroundColor Green
                 $ytDlp = Get-Command yt-dlp -ErrorAction SilentlyContinue
             } else {
-                Write-Host "[ERREUR] Impossible d'installer yt-dlp via winget." -ForegroundColor Red
-                Write-Host "Veuillez installer manuellement depuis https://github.com/yt-dlp/yt-dlp" -ForegroundColor Yellow
+                Write-Host "✗ Echec de l'installation via winget." -ForegroundColor Red
+                Write-Host "   Veuillez installer manuellement : https://github.com/yt-dlp/yt-dlp" -ForegroundColor Yellow
                 return $false
             }
         } catch {
-            Write-Host "[ERREUR] Winget n'est pas disponible ou ne fonctionne pas." -ForegroundColor Red
-            Write-Host "Installez yt-dlp manuellement ou installez winget d'abord." -ForegroundColor Yellow
+            Write-Host "✗ Winget n'est pas disponible." -ForegroundColor Red
+            Write-Host "   Installez yt-dlp manuellement ou installez winget d'abord." -ForegroundColor Yellow
             return $false
         }
-    }
-    
-    # Verifier ffmpeg
-    $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
-    if (-not $ffmpeg) {
-        Write-Host "`n[INFO] ffmpeg n'est pas installe. Installation en cours..." -ForegroundColor Yellow
-        try {
-            & winget install ffmpeg -e -h 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[OK] ffmpeg installe avec succes." -ForegroundColor Green
-            } else {
-                Write-Host "[AVERTISSEMENT] ffmpeg n'a pas pu etre installe." -ForegroundColor Yellow
-                Write-Host "Les fonctionnalites de video seront limitees." -ForegroundColor Yellow
+    } else {
+        $currentVersion = Get-YtDlpVersion
+        Write-Host "✓ yt-dlp detecte (v$currentVersion)" -ForegroundColor Green
+        
+        # Verifier les mises à jour (non-bloquant, en arriere-plan)
+        Write-Host "   Verification des mises a jour..." -ForegroundColor Gray
+        
+        $latestVersion = Get-LatestYtDlpVersion
+        
+        if ($latestVersion -and (Compare-Versions -Current $currentVersion -Latest $latestVersion)) {
+            Write-Host "⏳ Mise a jour disponible : v$latestVersion" -ForegroundColor Yellow
+            Write-Host "   Mise a jour en cours..." -ForegroundColor Gray
+            
+            try {
+                & winget upgrade yt-dlp -e -h 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    $newVersion = Get-YtDlpVersion
+                    Write-Host "✓ yt-dlp mis a jour vers v$newVersion !" -ForegroundColor Green
+                } else {
+                    Write-Host "⚠ La mise a jour a echoue, version actuelle utilisee (v$currentVersion)" -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Host "⚠ Impossible de mettre a jour, version actuelle utilisee (v$currentVersion)" -ForegroundColor Yellow
             }
-        } catch {
-            Write-Host "[AVERTISSEMENT] Impossible d'installer ffmpeg via winget." -ForegroundColor Yellow
         }
     }
     
     Write-Host ""
+    
+    # Verifier ffmpeg
+    $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
+    if (-not $ffmpeg) {
+        Write-Host "⏳ ffmpeg n'est pas installe..." -ForegroundColor Yellow
+        Write-Host "   Installation en cours avec winget..." -ForegroundColor Gray
+        
+        try {
+            & winget install ffmpeg -e -h 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✓ ffmpeg installe avec succes !" -ForegroundColor Green
+            } else {
+                Write-Host "⚠ Impossible d'installer ffmpeg (optionnel)" -ForegroundColor Yellow
+                Write-Host "   Les fonctionnalites video seront limitees." -ForegroundColor Gray
+            }
+        } catch {
+            Write-Host "⚠ Impossible d'installer ffmpeg (optionnel)" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "✓ ffmpeg detecte" -ForegroundColor Green
+    }
+    
+    Write-Host ""
+    Write-Host "Appuyez sur une touche pour continuer..." -ForegroundColor Cyan
+    Read-Host | Out-Null
+    
     return $true
 }
 
@@ -86,15 +167,19 @@ function Test-IsValideUrl {
 }
 
 function Get-PlaylistInfo {
-    param ([string]$InputUrl, [int]$TimeoutSeconds = 8)
+    param ([string]$InputUrl, [int]$TimeoutSeconds = 6)
     
-    Write-Host "Analyse de l'URL..." -ForegroundColor Gray
+    Write-Host "   🔍 Analyse rapide..." -ForegroundColor Gray
     
     try {
         $job = Start-Job -ScriptBlock {
             param($url)
-            $output = & yt-dlp --dump-json --flat-playlist --socket-timeout 5 $url 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
-            return $output
+            try {
+                $output = & yt-dlp --dump-json --flat-playlist --socket-timeout 4 $url 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
+                return $output
+            } catch {
+                return $null
+            }
         } -ArgumentList $InputUrl
         
         $result = Wait-Job -Job $job -Timeout $TimeoutSeconds -ErrorAction SilentlyContinue
@@ -112,26 +197,17 @@ function Get-PlaylistInfo {
                         Count = $count
                         Title = $output.title
                     }
-                } else {
-                    return @{
-                        IsPlaylist = $false
-                        Count = 1
-                        Title = $output.title
-                    }
                 }
             }
         } else {
             Remove-Job -Job $job -Force
-            Write-Host "Timeout lors de l'analyse. Continuation..." -ForegroundColor Yellow
         }
-    } catch {
-        # Erreur silencieuse
-    }
+    } catch {}
     
     return @{
         IsPlaylist = $false
         Count = 1
-        Title = "Video"
+        Title = "Contenu"
     }
 }
 
@@ -144,15 +220,15 @@ $hasFFmpeg = [bool](Get-Command ffmpeg -ErrorAction SilentlyContinue)
 
 while ($true) {
     Clear-Host
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "       TELECHARGEUR YT-DLP EXPRESS      " -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "    TELECHARGEUR YT-DLP EXPRESS" -ForegroundColor Cyan
+    Write-Host "════════════════════════════════════════" -ForegroundColor Cyan
     Write-Host ""
 
     # Etape 1 : URL
     $url = ""
     do {
-        $inputUrl = Read-Host "Colle le lien (ou tape 'q' pour quitter)"
+        $inputUrl = Read-Host "📎 Colle le lien (ou 'q' pour quitter)"
         $cleanInput = $inputUrl.Trim()
 
         if ($cleanInput -eq 'q') {
@@ -162,32 +238,32 @@ while ($true) {
         if (Test-IsValideUrl -InputUrl $cleanInput) {
             $url = $cleanInput
         } else {
-            Write-Host "Lien invalide. Entrez une URL HTTP/HTTPS." -ForegroundColor Red
+            Write-Host "❌ Lien invalide. Entrez une URL HTTP/HTTPS." -ForegroundColor Red
         }
     } until ($url -ne "")
 
-    # Etape 1.5 : Verifier si c'est une playlist (avec timeout rapide)
-    $playlistInfo = Get-PlaylistInfo -InputUrl $url -TimeoutSeconds 8
+    # Etape 1.5 : Verifier si c'est une playlist (rapide)
+    $playlistInfo = Get-PlaylistInfo -InputUrl $url -TimeoutSeconds 6
     
     if ($playlistInfo.IsPlaylist) {
-        Write-Host "`n[ATTENTION] Ceci est une PLAYLIST" -ForegroundColor Yellow
-        Write-Host "Titre : $($playlistInfo.Title)" -ForegroundColor Cyan
-        Write-Host "Nombre de fichiers : $($playlistInfo.Count)" -ForegroundColor Cyan
+        Write-Host "`n⚠️  PLAYLIST DETECTEE" -ForegroundColor Yellow
+        Write-Host "   Titre : $($playlistInfo.Title)" -ForegroundColor Cyan
+        Write-Host "   Nombre de fichiers : $($playlistInfo.Count)" -ForegroundColor Cyan
         Write-Host ""
         
-        $confirmPlaylist = Read-Host "Voulez-vous vraiment telecharger tous les $($playlistInfo.Count) fichiers ? (o/N)"
+        $confirmPlaylist = Read-Host "Telecharger les $($playlistInfo.Count) fichiers ? (o/N)"
         
         if ($confirmPlaylist.ToLower() -ne 'o') {
-            Write-Host "Telechargement annule." -ForegroundColor Yellow
+            Write-Host "   ❌ Telechargement annule." -ForegroundColor Yellow
             Start-Sleep -Seconds 1
             continue
         }
     }
 
     # Etape 2 : Format
-    Write-Host "`nFORMAT  :" -ForegroundColor Yellow
-    Write-Host "1. MP3 (Audio)"
-    Write-Host "2. MP4 (Video)"
+    Write-Host "`n📁 FORMAT :" -ForegroundColor Cyan
+    Write-Host "  1. MP3 (Audio)"
+    Write-Host "  2. MP4 (Video)"
 
     do {
         $formatChoix = (Read-Host "Choix (1 ou 2)").Trim()
@@ -196,10 +272,10 @@ while ($true) {
     # Etape 2.5 : Qualite Video
     $qualiteChoix = "1"
     if ($formatChoix -eq "2") {
-        Write-Host "`nQUALITE VIDEO :" -ForegroundColor Yellow
-        Write-Host "1. Max (4K/2K/1080p)"
-        Write-Host "2. 1080p max"
-        Write-Host "3. 720p max"
+        Write-Host "`n🎬 QUALITE VIDEO :" -ForegroundColor Cyan
+        Write-Host "  1. Max (4K/2K/1080p)"
+        Write-Host "  2. 1080p max"
+        Write-Host "  3. 720p max"
 
         do {
             $qualiteChoix = (Read-Host "Choix (1, 2 ou 3)").Trim()
@@ -238,16 +314,16 @@ while ($true) {
     $arguments += $url
 
     # Etape 4 : Execution
-    Write-Host "`nTelechargement en cours..." -ForegroundColor Green
+    Write-Host "`n⬇️  Telechargement en cours..." -ForegroundColor Green
     & yt-dlp @arguments
 
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "`nTelechargement termine avec succes !" -ForegroundColor Green
+        Write-Host "`n✅ Telechargement termine avec succes !" -ForegroundColor Green
     } else {
-        Write-Host "`n[ERREUR] Le telechargement a echoue." -ForegroundColor Red
+        Write-Host "`n❌ Le telechargement a echoue." -ForegroundColor Red
     }
 
     Write-Host ""
-    $action = Read-Host "[Entree] Recommencer | [Autre touche] Quitter"
+    $action = Read-Host "Appuyez sur ENTREE pour continuer ou une autre touche pour quitter"
     if ($action.Trim() -ne '') { break }
 }
