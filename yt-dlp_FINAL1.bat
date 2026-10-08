@@ -156,7 +156,7 @@ function Test-AndInstallDependency {
 
 function Get-UserDownloadPath {
     try {
-        return [System.IO.Path]::Combine([System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::UserProfile), "Downloads")
+        return [System.IO.Path]::Combine([System.Environment]::GetFolderPath([System.Environment]::SpecialFolder::UserProfile), "Downloads")
     } catch {
         return [System.IO.Path]::Combine($HOME, "Downloads")
     }
@@ -248,7 +248,7 @@ while ($true) {
     $playlistInfo = Get-PlaylistInfo -InputUrl $url -TimeoutSeconds 5
     
     if ($playlistInfo.IsPlaylist) {
-        Write-Host "' Ceci est une playlist" -ForegroundColor Yellow
+        Write-Host "🎵 Ceci est une playlist" -ForegroundColor Yellow
         Write-Host "Titre : $($playlistInfo.Title)" -ForegroundColor Cyan
         Write-Host "Nombre de fichiers : $($playlistInfo.Count)" -ForegroundColor Cyan
         Write-Host ""
@@ -325,8 +325,9 @@ while ($true) {
     Write-Host ""
     Write-Host "⬇️  Telechargement en cours..." -ForegroundColor Green
     & yt-dlp @arguments
+    $downloadSuccess = $LASTEXITCODE -eq 0
 
-    if ($LASTEXITCODE -eq 0) {
+    if ($downloadSuccess) {
         Write-Host ""
         Write-Host "✅ Telechargement termine avec succes !" -ForegroundColor Green
     } else {
