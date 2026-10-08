@@ -248,8 +248,11 @@ while ($true) {
     $playlistInfo = Get-PlaylistInfo -InputUrl $url -TimeoutSeconds 5
     
     if ($playlistInfo.IsPlaylist) {
+        Write-Host "' Ceci est une playlist" -ForegroundColor Yellow
+        Write-Host "Titre : $($playlistInfo.Title)" -ForegroundColor Cyan
+        Write-Host "Nombre de fichiers : $($playlistInfo.Count)" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "⚠️  PLAYLIST DETECTEE" -ForegroundColor Yellow
+        Write-Host "   Playlist trouvee" -ForegroundColor Yellow
         Write-Host "   Titre : $($playlistInfo.Title)" -ForegroundColor Cyan
         Write-Host "   Nombre de fichiers : $($playlistInfo.Count)" -ForegroundColor Cyan
         Write-Host ""
