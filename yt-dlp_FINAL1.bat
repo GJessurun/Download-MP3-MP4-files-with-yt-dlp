@@ -17,6 +17,7 @@ Fonctionnalites :
   - Installation automatique des dependances
   - Gestion d'erreur robuste
   - Logs detailles pour diagnostic
+  - Organisation automatique en dossiers (MP3 / MP4)
 ===============================================================================
 #>
 
@@ -66,10 +67,10 @@ function Write-Log {
 
 function Show-Title {
     Clear-Host
-    Write-Host "╔════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
     Write-Host "║          TELECHARGEUR YT-DLP EXPRESS v2.0                      ║" -ForegroundColor Cyan
     Write-Host "║                      Securise & Optimise                       ║" -ForegroundColor Cyan
-    Write-Host "╚════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
     Write-Host ""
 }
 
@@ -245,23 +246,52 @@ function Get-SafeDownloadPath {
     try {
         $downloadsPath = [System.IO.Path]::Combine(
             [System.Environment]::GetFolderPath([System.Environment]::SpecialFolder::UserProfile),
-            "Downloads"
+            "Downloads",
+            "yt-dlp"
         )
         
-        if (Test-Path -LiteralPath $downloadsPath -PathType Container) {
-            return $downloadsPath
+        # Creer le dossier s'il n'existe pas
+        if (-not (Test-Path -LiteralPath $downloadsPath -PathType Container)) {
+            New-Item -ItemType Directory -Path $downloadsPath -Force | Out-Null
         }
+        
+        return $downloadsPath
     } catch {}
     
     # Fallback
     try {
-        if (Test-Path -LiteralPath "$HOME\Downloads" -PathType Container) {
-            return "$HOME\Downloads"
+        $fallbackPath = "$HOME\Downloads\yt-dlp"
+        if (-not (Test-Path -LiteralPath $fallbackPath -PathType Container)) {
+            New-Item -ItemType Directory -Path $fallbackPath -Force | Out-Null
         }
+        return $fallbackPath
     } catch {}
     
     # Dernier recours
     return $HOME
+}
+
+function Get-FormatFolder {
+    param([string]$Format)
+    
+    if ($Format -eq "1") {
+        return "MP3"
+    } else {
+        return "MP4"
+    }
+}
+
+function Ensure-FormatFolder {
+    param([string]$BaseFolder, [string]$Format)
+    
+    $formatFolder = Get-FormatFolder -Format $Format
+    $fullPath = [System.IO.Path]::Combine($BaseFolder, $formatFolder)
+    
+    if (-not (Test-Path -LiteralPath $fullPath -PathType Container)) {
+        New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
+    }
+    
+    return $fullPath
 }
 
 # ============================================================================
@@ -442,8 +472,16 @@ function Start-Download {
     Show-Title
     Write-Host ""
     
+    # Creer le dossier pour le format
+    $outputFolder = Ensure-FormatFolder -BaseFolder $script:Config.DownloadFolder -Format $Format
+    
     # Construire les arguments
-    $args = Build-DownloadArgs -Url $Url -Format $Format -Quality $Quality -OutputFolder $script:Config.DownloadFolder
+    $args = Build-DownloadArgs -Url $Url -Format $Format -Quality $Quality -OutputFolder $outputFolder
+    
+    # Afficher le dossier de destination
+    $formatName = if ($Format -eq "1") { "MP3" } else { "MP4" }
+    Write-Log "Destination : $outputFolder" "INFO"
+    Write-Host ""
     
     # Execution
     Write-Log "Telechargement en cours..." "INFO"
@@ -472,7 +510,7 @@ function Main {
     
     # Initialiser le dossier de sortie
     $script:Config.DownloadFolder = Get-SafeDownloadPath
-    Write-Log "Dossier de sortie : $($script:Config.DownloadFolder)" "INFO"
+    Write-Log "Dossier principal : $($script:Config.DownloadFolder)" "INFO"
     Write-Host ""
     
     # Boucle principale
