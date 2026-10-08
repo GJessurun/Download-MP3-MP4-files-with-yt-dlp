@@ -24,13 +24,48 @@ try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 } catch {}
 
-function Test-Dependency {
+function Test-AndInstallDependency {
+    Write-Host "Verification des dependances..." -ForegroundColor Cyan
+    
+    # Verifier yt-dlp
     $ytDlp = Get-Command yt-dlp -ErrorAction SilentlyContinue
     if (-not $ytDlp) {
-        Write-Host "`n[ERREUR CRITIQUE] 'yt-dlp' n'est pas installe ou absent du PATH." -ForegroundColor Red
-        Write-Host "Place yt-dlp.exe dans le meme dossier que ce script." -ForegroundColor Yellow
-        return $false
+        Write-Host "`n[INFO] yt-dlp n'est pas installe. Installation en cours..." -ForegroundColor Yellow
+        try {
+            & winget install yt-dlp -e -h 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[OK] yt-dlp installe avec succes." -ForegroundColor Green
+                $ytDlp = Get-Command yt-dlp -ErrorAction SilentlyContinue
+            } else {
+                Write-Host "[ERREUR] Impossible d'installer yt-dlp via winget." -ForegroundColor Red
+                Write-Host "Veuillez installer manuellement depuis https://github.com/yt-dlp/yt-dlp" -ForegroundColor Yellow
+                return $false
+            }
+        } catch {
+            Write-Host "[ERREUR] Winget n'est pas disponible ou ne fonctionne pas." -ForegroundColor Red
+            Write-Host "Installez yt-dlp manuellement ou installez winget d'abord." -ForegroundColor Yellow
+            return $false
+        }
     }
+    
+    # Verifier ffmpeg
+    $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
+    if (-not $ffmpeg) {
+        Write-Host "`n[INFO] ffmpeg n'est pas installe. Installation en cours..." -ForegroundColor Yellow
+        try {
+            & winget install ffmpeg -e -h 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[OK] ffmpeg installe avec succes." -ForegroundColor Green
+            } else {
+                Write-Host "[AVERTISSEMENT] ffmpeg n'a pas pu etre installe." -ForegroundColor Yellow
+                Write-Host "Les fonctionnalites de video seront limitees." -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "[AVERTISSEMENT] Impossible d'installer ffmpeg via winget." -ForegroundColor Yellow
+        }
+    }
+    
+    Write-Host ""
     return $true
 }
 
@@ -51,45 +86,46 @@ function Test-IsValideUrl {
 }
 
 function Get-PlaylistInfo {
-    param ([string]$InputUrl)
+    param ([string]$InputUrl, [int]$TimeoutSeconds = 8)
     
-    Write-Host "`nVerification du contenu de l'URL..." -ForegroundColor Gray
+    Write-Host "Analyse de l'URL..." -ForegroundColor Gray
     
-    # Utilise yt-dlp pour recuperer les infos de la playlist sans telecharger
     try {
-        $output = & yt-dlp --dump-json --flat-playlist $InputUrl 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
+        $job = Start-Job -ScriptBlock {
+            param($url)
+            $output = & yt-dlp --dump-json --flat-playlist --socket-timeout 5 $url 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
+            return $output
+        } -ArgumentList $InputUrl
         
-        if ($output) {
-            # Si c'est une playlist
-            if ($output.entries -and $output.entries.Count -gt 1) {
-                return @{
-                    IsPlaylist = $true
-                    Count = $output.entries.Count
-                    Title = $output.title
-                }
-            } elseif ($output.entries -and $output.entries.Count -eq 1) {
-                # Une seule video
-                return @{
-                    IsPlaylist = $false
-                    Count = 1
-                    Title = $output.title
-                }
-            } else {
-                # Pas d'infos de playlist trouvees
-                return @{
-                    IsPlaylist = $false
-                    Count = 1
-                    Title = "Video"
+        $result = Wait-Job -Job $job -Timeout $TimeoutSeconds -ErrorAction SilentlyContinue
+        
+        if ($result) {
+            $output = Receive-Job -Job $job
+            Remove-Job -Job $job -Force
+            
+            if ($output -and $output.entries) {
+                $count = @($output.entries).Count
+                
+                if ($count -gt 1) {
+                    return @{
+                        IsPlaylist = $true
+                        Count = $count
+                        Title = $output.title
+                    }
+                } else {
+                    return @{
+                        IsPlaylist = $false
+                        Count = 1
+                        Title = $output.title
+                    }
                 }
             }
+        } else {
+            Remove-Job -Job $job -Force
+            Write-Host "Timeout lors de l'analyse. Continuation..." -ForegroundColor Yellow
         }
     } catch {
-        # En cas d'erreur, on suppose que ce n'est pas une playlist
-        return @{
-            IsPlaylist = $false
-            Count = 1
-            Title = "Video"
-        }
+        # Erreur silencieuse
     }
     
     return @{
@@ -99,7 +135,7 @@ function Get-PlaylistInfo {
     }
 }
 
-if (-not (Test-Dependency)) {
+if (-not (Test-AndInstallDependency)) {
     return
 }
 
@@ -130,8 +166,8 @@ while ($true) {
         }
     } until ($url -ne "")
 
-    # Etape 1.5 : Verifier si c'est une playlist
-    $playlistInfo = Get-PlaylistInfo -InputUrl $url
+    # Etape 1.5 : Verifier si c'est une playlist (avec timeout rapide)
+    $playlistInfo = Get-PlaylistInfo -InputUrl $url -TimeoutSeconds 8
     
     if ($playlistInfo.IsPlaylist) {
         Write-Host "`n[ATTENTION] Ceci est une PLAYLIST" -ForegroundColor Yellow
@@ -143,11 +179,9 @@ while ($true) {
         
         if ($confirmPlaylist.ToLower() -ne 'o') {
             Write-Host "Telechargement annule." -ForegroundColor Yellow
-            Start-Sleep -Seconds 2
+            Start-Sleep -Seconds 1
             continue
         }
-    } else {
-        Write-Host "`n✓ Video detectee" -ForegroundColor Green
     }
 
     # Etape 2 : Format
