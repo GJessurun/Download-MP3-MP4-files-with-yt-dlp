@@ -50,6 +50,55 @@ function Test-IsValideUrl {
             ($uriResult.Scheme -eq [System.Uri]::UriSchemeHttp -or $uriResult.Scheme -eq [System.Uri]::UriSchemeHttps))
 }
 
+function Get-PlaylistInfo {
+    param ([string]$InputUrl)
+    
+    Write-Host "`nVerification du contenu de l'URL..." -ForegroundColor Gray
+    
+    # Utilise yt-dlp pour recuperer les infos de la playlist sans telecharger
+    try {
+        $output = & yt-dlp --dump-json --flat-playlist $InputUrl 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
+        
+        if ($output) {
+            # Si c'est une playlist
+            if ($output.entries -and $output.entries.Count -gt 1) {
+                return @{
+                    IsPlaylist = $true
+                    Count = $output.entries.Count
+                    Title = $output.title
+                }
+            } elseif ($output.entries -and $output.entries.Count -eq 1) {
+                # Une seule video
+                return @{
+                    IsPlaylist = $false
+                    Count = 1
+                    Title = $output.title
+                }
+            } else {
+                # Pas d'infos de playlist trouvees
+                return @{
+                    IsPlaylist = $false
+                    Count = 1
+                    Title = "Video"
+                }
+            }
+        }
+    } catch {
+        # En cas d'erreur, on suppose que ce n'est pas une playlist
+        return @{
+            IsPlaylist = $false
+            Count = 1
+            Title = "Video"
+        }
+    }
+    
+    return @{
+        IsPlaylist = $false
+        Count = 1
+        Title = "Video"
+    }
+}
+
 if (-not (Test-Dependency)) {
     return
 }
@@ -80,6 +129,26 @@ while ($true) {
             Write-Host "Lien invalide. Entrez une URL HTTP/HTTPS." -ForegroundColor Red
         }
     } until ($url -ne "")
+
+    # Etape 1.5 : Verifier si c'est une playlist
+    $playlistInfo = Get-PlaylistInfo -InputUrl $url
+    
+    if ($playlistInfo.IsPlaylist) {
+        Write-Host "`n[ATTENTION] Ceci est une PLAYLIST" -ForegroundColor Yellow
+        Write-Host "Titre : $($playlistInfo.Title)" -ForegroundColor Cyan
+        Write-Host "Nombre de fichiers : $($playlistInfo.Count)" -ForegroundColor Cyan
+        Write-Host ""
+        
+        $confirmPlaylist = Read-Host "Voulez-vous vraiment telecharger tous les $($playlistInfo.Count) fichiers ? (o/N)"
+        
+        if ($confirmPlaylist.ToLower() -ne 'o') {
+            Write-Host "Telechargement annule." -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+            continue
+        }
+    } else {
+        Write-Host "`n✓ Video detectee" -ForegroundColor Green
+    }
 
     # Etape 2 : Format
     Write-Host "`nFORMAT  :" -ForegroundColor Yellow
